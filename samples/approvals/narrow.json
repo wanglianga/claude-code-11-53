@@ -1,0 +1,15 @@
+{
+  "purpose": "Cross-region comparison for DE-BB, BR-MT and US-IA only",
+  "recipient": "regional-ops@example.org",
+  "scope_regions": [
+    "BR-MT",
+    "DE-BB",
+    "US-IA"
+  ],
+  "scope_metrics": [
+    "operation_count",
+    "completion_rate",
+    "area_ha"
+  ],
+  "valid_until": "2026-12-31T23:59:59Z"
+}

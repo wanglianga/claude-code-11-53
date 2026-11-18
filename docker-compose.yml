@@ -1,0 +1,61 @@
+# One-command local stack: PostgreSQL + the AgriSync API.
+#   docker compose up --build
+# API docs: http://localhost:8080/docs
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:18-alpine}
+    environment:
+      POSTGRES_USER: ccdev
+      POSTGRES_PASSWORD: ccdev
+      POSTGRES_DB: ccdev
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ccdev -d ccdev"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  agrisync:
+    build:
+      context: .
+      args:
+        # Point at a registry mirror when Docker Hub is not reachable.
+        GO_IMAGE: ${GO_IMAGE:-golang:1.26-bookworm}
+        GOPROXY: ${GOPROXY:-https://goproxy.cn,direct}
+        RUNTIME_IMAGE: ${RUNTIME_IMAGE:-gcr.io/distroless/static-debian12:nonroot}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/agrisync", "-healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    environment:
+      HTTP_ADDR: ":8080"
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ccdev
+      PGPASSWORD: ccdev
+      PGSSLMODE: disable
+      # Demo tokens. Override in any real deployment.
+      TOKEN_ADMIN: demo-admin-token
+      TOKEN_ANALYST: demo-analyst-token
+      TOKEN_APPROVER: demo-approver-token
+      TOKEN_AUDITOR: demo-auditor-token
+      TOKEN_OPERATOR_DE_BB: demo-operator-de-bb
+      TOKEN_OPERATOR_BR_MT: demo-operator-br-mt
+      TOKEN_OPERATOR_US_IA: demo-operator-us-ia
+      TOKEN_OPERATOR_FR_NOR: demo-operator-fr-nor
+      # Uncomment to run a background replication sweep every 5s (the replay
+      # script assumes API-driven replication and would race with it).
+      # REPLICATION_INTERVAL: 5s
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:

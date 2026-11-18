@@ -1,0 +1,19 @@
+{
+  "purpose": "Group agronomy weekly completion review",
+  "recipient": "group-agronomy@example.org",
+  "scope_regions": [
+    "BR-MT",
+    "DE-BB",
+    "FR-NOR",
+    "US-IA"
+  ],
+  "scope_metrics": [
+    "operation_count",
+    "completed_count",
+    "completion_rate",
+    "area_ha",
+    "fuel_l",
+    "duration_hours"
+  ],
+  "valid_until": "2026-12-31T23:59:59Z"
+}

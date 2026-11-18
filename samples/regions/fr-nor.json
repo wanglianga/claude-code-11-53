@@ -1,0 +1,191 @@
+{
+  "batch_id": "initial",
+  "operations": [
+    {
+      "device_serial": "FR-SEED-1304",
+      "segment_id": "FR-NOR-initial-1",
+      "operation_type": "seeding",
+      "field_id": "NOR-F-31",
+      "area_ha": 54.0,
+      "fuel_l": 380.0,
+      "duration_s": 5400,
+      "completed": true,
+      "started_at": "2026-11-01T12:00:00Z",
+      "ended_at": "2026-11-01T13:30:00Z",
+      "points": [
+        {
+          "lat": 49.18,
+          "lon": 0.37,
+          "at": "2026-11-01T12:00:00Z"
+        },
+        {
+          "lat": 49.1812,
+          "lon": 0.3709,
+          "at": "2026-11-01T12:07:00Z"
+        },
+        {
+          "lat": 49.1824,
+          "lon": 0.3718,
+          "at": "2026-11-01T12:14:00Z"
+        },
+        {
+          "lat": 49.1836,
+          "lon": 0.3727,
+          "at": "2026-11-01T12:21:00Z"
+        },
+        {
+          "lat": 49.1848,
+          "lon": 0.3736,
+          "at": "2026-11-01T12:28:00Z"
+        },
+        {
+          "lat": 49.186,
+          "lon": 0.3745,
+          "at": "2026-11-01T12:35:00Z"
+        }
+      ],
+      "alarms": []
+    },
+    {
+      "device_serial": "FR-HARV-2304",
+      "segment_id": "FR-NOR-initial-2",
+      "operation_type": "harvesting",
+      "field_id": "NOR-F-32",
+      "area_ha": 66.5,
+      "fuel_l": 455.25,
+      "duration_s": 6600,
+      "completed": true,
+      "started_at": "2026-11-01T21:00:00Z",
+      "ended_at": "2026-11-01T22:50:00Z",
+      "points": [
+        {
+          "lat": 49.18,
+          "lon": 0.37,
+          "at": "2026-11-01T21:00:00Z"
+        },
+        {
+          "lat": 49.1812,
+          "lon": 0.3709,
+          "at": "2026-11-01T21:07:00Z"
+        },
+        {
+          "lat": 49.1824,
+          "lon": 0.3718,
+          "at": "2026-11-01T21:14:00Z"
+        },
+        {
+          "lat": 49.1836,
+          "lon": 0.3727,
+          "at": "2026-11-01T21:21:00Z"
+        },
+        {
+          "lat": 49.1848,
+          "lon": 0.3736,
+          "at": "2026-11-01T21:28:00Z"
+        },
+        {
+          "lat": 49.186,
+          "lon": 0.3745,
+          "at": "2026-11-01T21:35:00Z"
+        }
+      ],
+      "alarms": []
+    },
+    {
+      "device_serial": "FR-FERT-3304",
+      "segment_id": "FR-NOR-initial-3",
+      "operation_type": "fertilizing",
+      "field_id": "NOR-F-33",
+      "area_ha": 41.25,
+      "fuel_l": 190.0,
+      "duration_s": 3000,
+      "completed": true,
+      "started_at": "2026-11-02T06:00:00Z",
+      "ended_at": "2026-11-02T06:50:00Z",
+      "points": [
+        {
+          "lat": 49.18,
+          "lon": 0.37,
+          "at": "2026-11-02T06:00:00Z"
+        },
+        {
+          "lat": 49.1812,
+          "lon": 0.3709,
+          "at": "2026-11-02T06:07:00Z"
+        },
+        {
+          "lat": 49.1824,
+          "lon": 0.3718,
+          "at": "2026-11-02T06:14:00Z"
+        },
+        {
+          "lat": 49.1836,
+          "lon": 0.3727,
+          "at": "2026-11-02T06:21:00Z"
+        },
+        {
+          "lat": 49.1848,
+          "lon": 0.3736,
+          "at": "2026-11-02T06:28:00Z"
+        },
+        {
+          "lat": 49.186,
+          "lon": 0.3745,
+          "at": "2026-11-02T06:35:00Z"
+        }
+      ],
+      "alarms": [
+        {
+          "code": "GPS_SIGNAL_DEGRADED",
+          "severity": "info",
+          "occurred_at": "2026-11-02T06:25:00Z"
+        }
+      ]
+    },
+    {
+      "device_serial": "FR-SEED-1304",
+      "segment_id": "FR-NOR-initial-4",
+      "operation_type": "seeding",
+      "field_id": "NOR-F-31",
+      "area_ha": 38.0,
+      "fuel_l": 175.0,
+      "duration_s": 5400,
+      "completed": true,
+      "started_at": "2026-11-02T15:00:00Z",
+      "ended_at": "2026-11-02T16:30:00Z",
+      "points": [
+        {
+          "lat": 49.18,
+          "lon": 0.37,
+          "at": "2026-11-02T15:00:00Z"
+        },
+        {
+          "lat": 49.1812,
+          "lon": 0.3709,
+          "at": "2026-11-02T15:07:00Z"
+        },
+        {
+          "lat": 49.1824,
+          "lon": 0.3718,
+          "at": "2026-11-02T15:14:00Z"
+        },
+        {
+          "lat": 49.1836,
+          "lon": 0.3727,
+          "at": "2026-11-02T15:21:00Z"
+        },
+        {
+          "lat": 49.1848,
+          "lon": 0.3736,
+          "at": "2026-11-02T15:28:00Z"
+        },
+        {
+          "lat": 49.186,
+          "lon": 0.3745,
+          "at": "2026-11-02T15:35:00Z"
+        }
+      ],
+      "alarms": []
+    }
+  ]
+}

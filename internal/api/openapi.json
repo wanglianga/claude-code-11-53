@@ -1,0 +1,2660 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "AgriSync Cross-Region Operations API",
+    "version": "1.0.0",
+    "description": "作业数据跨地域同步与出境审计服务。区域节点在本地提交原始作业事件（含受限轨迹）；复制编排器按数据类别与驻留政策生成跨区副本；聚合服务在区域内计算可出境指标；出境审计服务在交付前重新核验授权、数据范围与复制版本；容灾登记册记录主备角色和最后已确认复制位置。\n\n鉴权：除 `/healthz`、`/openapi.json`、`/docs` 外，所有接口需 `Authorization: Bearer <token>`。演示令牌见 README。",
+    "contact": {
+      "name": "Platform team",
+      "email": "platform@example.org"
+    }
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "same host as the API"
+    }
+  ],
+  "tags": [
+    {
+      "name": "System",
+      "description": "健康检查与 API 文档"
+    },
+    {
+      "name": "Regions",
+      "description": "区域本地写入与本地查询（低延迟，不出境）"
+    },
+    {
+      "name": "Replication",
+      "description": "政策过滤后的跨区复制控制面"
+    },
+    {
+      "name": "Outbound",
+      "description": "出境申请与审批"
+    },
+    {
+      "name": "Aggregate",
+      "description": "区域内聚合与集团可见性"
+    },
+    {
+      "name": "Delivery",
+      "description": "交付前复核与审计链"
+    },
+    {
+      "name": "DR",
+      "description": "容灾登记册与主备切换"
+    },
+    {
+      "name": "Audit",
+      "description": "哈希链审计账本"
+    },
+    {
+      "name": "Demo",
+      "description": "演示环境辅助接口"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "演示令牌，例如 demo-admin-token"
+      }
+    },
+    "parameters": {
+      "Region": {
+        "name": "region",
+        "in": "path",
+        "required": true,
+        "description": "区域代码，例如 DE-BB、BR-MT、US-IA、FR-NOR",
+        "schema": {
+          "type": "string",
+          "example": "BR-MT"
+        }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 100
+        }
+      },
+      "RunID": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "DeliveryID": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "ApprovalID": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "Subject": {
+        "name": "subject",
+        "in": "path",
+        "required": true,
+        "description": "审计对象 id，例如 dlv_...、run_...、apr_...、区域代码",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "unauthorized",
+                  "forbidden",
+                  "not_found",
+                  "conflict",
+                  "invalid_request",
+                  "unavailable",
+                  "internal_error"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "GeoPoint": {
+        "type": "object",
+        "description": "受限数据：原始轨迹采样点",
+        "properties": {
+          "lat": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "lon": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "lat",
+          "lon",
+          "at"
+        ]
+      },
+      "Alarm": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "HYDRAULIC_PRESSURE_LOW"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "info",
+              "warning",
+              "critical"
+            ]
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "occurred_at"
+        ]
+      },
+      "OperationInput": {
+        "type": "object",
+        "description": "一个作业片段。去重键：(device_serial, segment_id)，作用域为接收区域。",
+        "properties": {
+          "device_serial": {
+            "type": "string",
+            "example": "BR-SEED-1102"
+          },
+          "segment_id": {
+            "type": "string",
+            "example": "BR-MT-initial-1"
+          },
+          "operation_type": {
+            "type": "string",
+            "enum": [
+              "seeding",
+              "harvesting",
+              "fertilizing"
+            ]
+          },
+          "field_id": {
+            "type": "string",
+            "example": "MT-F-11"
+          },
+          "area_ha": {
+            "type": "number",
+            "minimum": 0
+          },
+          "fuel_l": {
+            "type": "number",
+            "minimum": 0
+          },
+          "duration_s": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "completed": {
+            "type": "boolean"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ended_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "points": {
+            "type": "array",
+            "maxItems": 5000,
+            "items": {
+              "$ref": "#/components/schemas/GeoPoint"
+            }
+          },
+          "alarms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Alarm"
+            }
+          }
+        },
+        "required": [
+          "device_serial",
+          "segment_id",
+          "operation_type",
+          "area_ha",
+          "started_at"
+        ]
+      },
+      "IngestBatch": {
+        "type": "object",
+        "properties": {
+          "batch_id": {
+            "type": "string",
+            "example": "initial"
+          },
+          "operations": {
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "$ref": "#/components/schemas/OperationInput"
+            }
+          }
+        },
+        "required": [
+          "batch_id",
+          "operations"
+        ]
+      },
+      "IngestResult": {
+        "type": "object",
+        "properties": {
+          "region": {
+            "type": "string"
+          },
+          "batch_id": {
+            "type": "string"
+          },
+          "accepted": {
+            "type": "integer"
+          },
+          "duplicates": {
+            "type": "integer"
+          },
+          "rejected": {
+            "type": "integer"
+          },
+          "errors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "first_journal_seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "last_journal_seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "active_node": {
+            "type": "string"
+          },
+          "local_commit": {
+            "type": "string",
+            "enum": [
+              "committed_locally"
+            ]
+          },
+          "replayed_batch": {
+            "type": "boolean",
+            "description": "相同 batch_id 与内容的重放：返回原始回执，不重复写入"
+          }
+        }
+      },
+      "RegionStatus": {
+        "type": "object",
+        "properties": {
+          "region_code": {
+            "type": "string"
+          },
+          "active_node": {
+            "type": "string"
+          },
+          "epoch": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "journal_head": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "journal_entries": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "operation_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "outbox_head": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pending_outbox": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "data_cutoff": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "replication_link": {
+            "type": "string",
+            "enum": [
+              "online",
+              "offline",
+              "unknown"
+            ]
+          },
+          "handover_ready": {
+            "type": "boolean"
+          }
+        }
+      },
+      "JournalVerification": {
+        "type": "object",
+        "properties": {
+          "region": {
+            "type": "string"
+          },
+          "gapless": {
+            "type": "boolean"
+          },
+          "head_seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "entries": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "missing_seqs": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "checked_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OperationRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "journal_seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "device_serial": {
+            "type": "string"
+          },
+          "segment_id": {
+            "type": "string"
+          },
+          "operation_type": {
+            "type": "string"
+          },
+          "field_id": {
+            "type": "string"
+          },
+          "area_ha": {
+            "type": "number"
+          },
+          "fuel_l": {
+            "type": "number"
+          },
+          "duration_s": {
+            "type": "integer"
+          },
+          "completed": {
+            "type": "boolean"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ended_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "point_count": {
+            "type": "integer"
+          },
+          "alarms": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Alarm"
+            }
+          },
+          "source_node": {
+            "type": "string"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ReplicationRun": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "source_region": {
+            "type": "string"
+          },
+          "from_seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "to_seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "copied_by_category": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "blocked_by_category": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "succeeded",
+              "failed",
+              "noop"
+            ]
+          },
+          "fault": {
+            "type": "string",
+            "enum": [
+              "none",
+              "link_down",
+              "copy_fail",
+              "confirm_fail"
+            ]
+          },
+          "error": {
+            "type": "string"
+          },
+          "discarded_unconfirmed": {
+            "type": "integer",
+            "description": "失败尝试中已回滚的未确认副本行数"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finished_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ReplicationCursor": {
+        "type": "object",
+        "properties": {
+          "source_region": {
+            "type": "string"
+          },
+          "scanned_seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "confirmed_seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "idle",
+              "failed",
+              "pending_reconcile"
+            ]
+          },
+          "retry_count": {
+            "type": "integer"
+          },
+          "copied_total": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "blocked_total": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "last_attempt_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "last_success_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "LinkState": {
+        "type": "object",
+        "properties": {
+          "region_code": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "online",
+              "offline"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ResidencyPolicy": {
+        "type": "object",
+        "properties": {
+          "region_code": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "raw_trajectory",
+              "operation_summary",
+              "device_alarm",
+              "aggregate_metric"
+            ]
+          },
+          "outbound_allowed": {
+            "type": "boolean"
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OutboundRequestInput": {
+        "type": "object",
+        "properties": {
+          "purpose": {
+            "type": "string"
+          },
+          "recipient": {
+            "type": "string",
+            "format": "email"
+          },
+          "scope_regions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "BR-MT",
+              "DE-BB"
+            ]
+          },
+          "scope_metrics": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "operation_count",
+                "completed_count",
+                "completion_rate",
+                "area_ha",
+                "fuel_l",
+                "duration_hours"
+              ]
+            }
+          },
+          "valid_from": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "valid_until": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "required": [
+          "purpose",
+          "recipient",
+          "scope_regions",
+          "scope_metrics"
+        ]
+      },
+      "OutboundRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "recipient": {
+            "type": "string"
+          },
+          "scope_regions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scope_metrics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "revoked"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "description": "每次审批/撤回递增；交付时须与聚合运行记录一致"
+          },
+          "valid_from": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "valid_until": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "requested_by": {
+            "type": "string"
+          },
+          "decided_by": {
+            "type": "string"
+          },
+          "decided_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "decision_note": {
+            "type": "string"
+          },
+          "revoked_by": {
+            "type": "string"
+          },
+          "revoked_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "revoke_reason": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Metrics": {
+        "type": "object",
+        "properties": {
+          "operation_count": {
+            "type": "integer"
+          },
+          "completed_count": {
+            "type": "integer"
+          },
+          "completion_rate": {
+            "type": "number",
+            "description": "百分比，保留两位"
+          },
+          "area_ha": {
+            "type": "number"
+          },
+          "fuel_l": {
+            "type": "number"
+          },
+          "duration_hours": {
+            "type": "number"
+          }
+        }
+      },
+      "RegionMetric": {
+        "type": "object",
+        "properties": {
+          "region_code": {
+            "type": "string"
+          },
+          "included": {
+            "type": "boolean"
+          },
+          "exclusion_reason": {
+            "type": "string"
+          },
+          "replication_seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "snapshot_id": {
+            "type": "string"
+          },
+          "data_cutoff": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lag_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/Metrics"
+          }
+        }
+      },
+      "Coverage": {
+        "type": "object",
+        "properties": {
+          "included_regions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "excluded_regions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stale_regions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "被排除的延迟区域（断网等）"
+          },
+          "regions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RegionMetric"
+            }
+          },
+          "data_cutoff": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AggregateRunInput": {
+        "type": "object",
+        "properties": {
+          "approval_id": {
+            "type": "string"
+          },
+          "period_from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "period_to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "metric_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "approval_id",
+          "period_from",
+          "period_to",
+          "metric_keys"
+        ]
+      },
+      "AggregateRun": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "approval_id": {
+            "type": "string"
+          },
+          "approval_version": {
+            "type": "integer"
+          },
+          "period_from": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "period_to": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "metric_keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "computed",
+              "delivered",
+              "blocked"
+            ]
+          },
+          "scope_snapshot": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "聚合启动时的审批区域范围"
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/Coverage"
+          },
+          "result": {
+            "$ref": "#/components/schemas/Metrics"
+          },
+          "data_cutoff": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "requested_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deliveries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Delivery"
+            }
+          }
+        }
+      },
+      "Check": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
+      "Delivery": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "approval_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "sent",
+              "blocked"
+            ]
+          },
+          "channel": {
+            "type": "string"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Check"
+            }
+          },
+          "blocked_reason": {
+            "type": "string"
+          },
+          "artifact": {
+            "type": "object",
+            "nullable": true,
+            "description": "仅 status=sent 时存在；被阻断的交付不返回任何聚合内容",
+            "additionalProperties": true
+          },
+          "artifact_sha256": {
+            "type": "string"
+          },
+          "audit_seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "requested_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "sent_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "ArtifactVerification": {
+        "type": "object",
+        "properties": {
+          "delivery_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "recomputed_sha256": {
+            "type": "string"
+          },
+          "recorded_sha256": {
+            "type": "string"
+          },
+          "sha256_matches": {
+            "type": "boolean"
+          },
+          "restricted_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "audit_seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "audit_entry_valid": {
+            "type": "boolean"
+          },
+          "audit_chain_valid": {
+            "type": "boolean"
+          },
+          "audit_chain_head": {
+            "type": "string"
+          },
+          "artifact_bytes": {
+            "type": "integer"
+          },
+          "verified_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DRRegistry": {
+        "type": "object",
+        "properties": {
+          "region_code": {
+            "type": "string"
+          },
+          "primary_node": {
+            "type": "string"
+          },
+          "standby_node": {
+            "type": "string"
+          },
+          "active_node": {
+            "type": "string"
+          },
+          "epoch": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "last_confirmed_seq": {
+            "type": "integer",
+            "format": "int64",
+            "description": "新主节点唯一允许的续传位置"
+          },
+          "last_confirmed_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "healthy",
+              "failed_over",
+              "reconciling"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "FailoverResult": {
+        "type": "object",
+        "properties": {
+          "region_code": {
+            "type": "string"
+          },
+          "from_node": {
+            "type": "string"
+          },
+          "to_node": {
+            "type": "string"
+          },
+          "epoch": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "confirmed_seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "discarded_unconfirmed_rows": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "replication_reset_to_confirmed": {
+            "type": "boolean"
+          },
+          "resumed_from_seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "new_primary_state": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AuditEvent": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "subject_type": {
+            "type": "string"
+          },
+          "subject_id": {
+            "type": "string"
+          },
+          "region_code": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "prev_hash": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          }
+        }
+      },
+      "AuditVerification": {
+        "type": "object",
+        "properties": {
+          "valid": {
+            "type": "boolean"
+          },
+          "checked": {
+            "type": "integer"
+          },
+          "broken_at": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "head_hash": {
+            "type": "string"
+          },
+          "head_seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "verified_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "请求体或参数不合法",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "缺少或无效令牌",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "角色或区域权限不足",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "对象不存在",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "状态冲突（重复、已撤回、已交付等）",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Unavailable": {
+        "description": "跨区链路不可用",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/healthz": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "security": [],
+        "summary": "健康检查",
+        "responses": {
+          "200": {
+            "description": "服务状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "degraded"
+                      ]
+                    },
+                    "service": {
+                      "type": "string"
+                    },
+                    "regions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "time": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "security": [],
+        "summary": "本 OpenAPI 3 文档",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.0.3 JSON"
+          }
+        }
+      }
+    },
+    "/docs": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "security": [],
+        "summary": "Swagger UI",
+        "responses": {
+          "200": {
+            "description": "HTML 页面"
+          }
+        }
+      }
+    },
+    "/regions": {
+      "get": {
+        "tags": [
+          "Regions"
+        ],
+        "summary": "列出已配置区域",
+        "responses": {
+          "200": {
+            "description": "区域列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "regions": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "country": {
+                            "type": "string"
+                          },
+                          "timezone": {
+                            "type": "string"
+                          },
+                          "primary_node": {
+                            "type": "string"
+                          },
+                          "standby_node": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/regions/{region}/ingest": {
+      "post": {
+        "tags": [
+          "Regions"
+        ],
+        "summary": "上传作业片段批次（本地确认，断网可继续）",
+        "description": "写入只触及该区域的数据库，不依赖控制面。两层幂等：相同 batch_id+内容返回原始回执；片段级按 (device_serial, segment_id) 去重。一次事务内写入本地日志、outbox（summary/trajectory/alarm 分事件）与回执。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Region"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestBatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "本地已提交",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/regions/{region}/status": {
+      "get": {
+        "tags": [
+          "Regions"
+        ],
+        "summary": "区域本地状态与复制滞后",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Region"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "区域状态",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegionStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/regions/{region}/operations": {
+      "get": {
+        "tags": [
+          "Regions"
+        ],
+        "summary": "区域本地作业记录（不出境；仅本区操作员/审计员/管理员）",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Region"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "name": "operation_type",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "seeding",
+                "harvesting",
+                "fertilizing"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "作业记录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "region": {
+                      "type": "string"
+                    },
+                    "operations": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OperationRecord"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/regions/{region}/journal/verify": {
+      "get": {
+        "tags": [
+          "Regions"
+        ],
+        "summary": "校验本地日志连续性",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Region"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "连续性结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JournalVerification"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/replication/run": {
+      "post": {
+        "tags": [
+          "Replication"
+        ],
+        "summary": "对单个区域执行一次政策过滤复制",
+        "description": "按类别过滤驻留政策；受限原始轨迹不进入控制面。副本先写为 unconfirmed，确认后才对集团可见并推进 DR 登记册位置。fault 可用于验收演练：link_down / copy_fail / confirm_fail。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "region": {
+                    "type": "string",
+                    "example": "BR-MT"
+                  },
+                  "fault": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "link_down",
+                      "copy_fail",
+                      "confirm_fail"
+                    ],
+                    "default": "none"
+                  }
+                },
+                "required": [
+                  "region"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "复制运行结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplicationRun"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "description": "链路离线；同时返回 run 明细",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "$ref": "#/components/schemas/Error"
+                    },
+                    "run": {
+                      "$ref": "#/components/schemas/ReplicationRun"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/replication/batch": {
+      "post": {
+        "tags": [
+          "Replication"
+        ],
+        "summary": "对所有区域执行复制（管理角色）",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fault": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "link_down",
+                      "copy_fail",
+                      "confirm_fail"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "各区域结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ReplicationRun"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/replication/cursors": {
+      "get": {
+        "tags": [
+          "Replication"
+        ],
+        "summary": "复制游标（扫描位/已确认位/重试次数）",
+        "responses": {
+          "200": {
+            "description": "游标列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cursors": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ReplicationCursor"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/replication/runs": {
+      "get": {
+        "tags": [
+          "Replication"
+        ],
+        "summary": "复制运行历史",
+        "parameters": [
+          {
+            "name": "region",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "运行历史",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ReplicationRun"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/replication/links": {
+      "get": {
+        "tags": [
+          "Replication"
+        ],
+        "summary": "跨区链路状态",
+        "responses": {
+          "200": {
+            "description": "链路列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "links": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/LinkState"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/replication/links/{region}": {
+      "post": {
+        "tags": [
+          "Replication"
+        ],
+        "summary": "设置链路在线/离线（管理角色，验收演练用）",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Region"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "online",
+                      "offline"
+                    ]
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "更新后的链路列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "links": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/LinkState"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/replication/policies": {
+      "get": {
+        "tags": [
+          "Replication"
+        ],
+        "summary": "驻留政策（按区域×数据类别）",
+        "responses": {
+          "200": {
+            "description": "政策列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "policies": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ResidencyPolicy"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/replication/replicas": {
+      "get": {
+        "tags": [
+          "Replication"
+        ],
+        "summary": "集团可见副本统计（证明受限轨迹未被复制）",
+        "responses": {
+          "200": {
+            "description": "按区域统计",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "operation_summaries_by_region": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer"
+                      }
+                    },
+                    "raw_trajectories_by_region": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer"
+                      }
+                    },
+                    "device_alarms_by_region": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer"
+                      }
+                    },
+                    "aggregate_metrics_by_region": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer"
+                      }
+                    },
+                    "unconfirmed_by_region": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/outbound/requests": {
+      "get": {
+        "tags": [
+          "Outbound"
+        ],
+        "summary": "列出出境申请",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "申请列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "requests": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/OutboundRequest"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Outbound"
+        ],
+        "summary": "提交出境申请（集团分析角色）",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutboundRequestInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "申请已创建",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboundRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/outbound/requests/{id}": {
+      "get": {
+        "tags": [
+          "Outbound"
+        ],
+        "summary": "查询单个申请",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ApprovalID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "申请详情",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboundRequest"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/outbound/requests/{id}/decide": {
+      "post": {
+        "tags": [
+          "Outbound"
+        ],
+        "summary": "审批（数据管理员角色）",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ApprovalID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "approved",
+                      "rejected"
+                    ]
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "decision"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "更新后的申请",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboundRequest"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/outbound/requests/{id}/revoke": {
+      "post": {
+        "tags": [
+          "Outbound"
+        ],
+        "summary": "撤回已批准申请（交付前重新核验会阻断）",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ApprovalID"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "已撤回",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboundRequest"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/aggregates": {
+      "get": {
+        "tags": [
+          "Aggregate"
+        ],
+        "summary": "列出聚合运行",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "运行列表",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AggregateRun"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Aggregate"
+        ],
+        "summary": "计算区域内聚合（集团分析角色）",
+        "description": "在审批范围的各区域内本地计算指标，只把聚合快照纳入复制；随后按已确认副本计算集团结果。未确认的区域列入 excluded_regions 与 stale_regions，并给出 data_cutoff 与 lag_seconds。",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AggregateRunInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "聚合运行",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AggregateRun"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/aggregates/{id}": {
+      "get": {
+        "tags": [
+          "Aggregate"
+        ],
+        "summary": "查询聚合运行（含覆盖与排除区域）",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "运行详情",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AggregateRun"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/aggregates/{id}/deliver": {
+      "post": {
+        "tags": [
+          "Delivery"
+        ],
+        "summary": "交付前复核并发送（集团分析角色）",
+        "description": "重新读取当前审批（状态、版本、有效期、区域/指标范围）与当前驻留政策，扫描实际出境字节中是否含受限字段。任一检查失败：交付被阻断，不产生 artifact，写入 deny 审计。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RunID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "已发送",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Delivery"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "description": "交付被阻断（首次交付已发生则拒绝重复交付）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Delivery"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/deliveries/{id}": {
+      "get": {
+        "tags": [
+          "Delivery"
+        ],
+        "summary": "查询交付记录与出境文件",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/DeliveryID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "交付详情",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Delivery"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/deliveries/{id}/verify": {
+      "get": {
+        "tags": [
+          "Delivery"
+        ],
+        "summary": "核验出境文件审计链",
+        "description": "对存储的出境字节重新计算 SHA-256，比对交付时记录的摘要；扫描受限字段；确认对应审计条目存在且整个哈希链可验证。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/DeliveryID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "核验通过",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactVerification"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "核验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactVerification"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dr": {
+      "get": {
+        "tags": [
+          "DR"
+        ],
+        "summary": "容灾登记册全量",
+        "responses": {
+          "200": {
+            "description": "登记册",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "regions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DRRegistry"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/dr/{region}": {
+      "get": {
+        "tags": [
+          "DR"
+        ],
+        "summary": "单区域登记册与切换历史",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Region"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "登记册与事件",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "registry": {
+                      "$ref": "#/components/schemas/DRRegistry"
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/dr/{region}/failover": {
+      "post": {
+        "tags": [
+          "DR"
+        ],
+        "summary": "主备切换（管理角色）",
+        "description": "提升备节点。只从 DR 登记册已确认位置继续：丢弃未确认副本、回绕游标、epoch+1，本地日志与本地记账不截断。",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Region"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reconcile": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "切换后立即按确认位置续传"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "切换结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FailoverResult"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/dr/{region}/failback": {
+      "post": {
+        "tags": [
+          "DR"
+        ],
+        "summary": "切回原主节点（管理角色）",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Region"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "切回结果",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FailoverResult"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          }
+        }
+      }
+    },
+    "/audit": {
+      "get": {
+        "tags": [
+          "Audit"
+        ],
+        "summary": "最近审计事件（倒序）",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "审计事件",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AuditEvent"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit/verify": {
+      "get": {
+        "tags": [
+          "Audit"
+        ],
+        "summary": "验证整条哈希链",
+        "responses": {
+          "200": {
+            "description": "链有效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditVerification"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "链被篡改",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditVerification"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/audit/{subject}": {
+      "get": {
+        "tags": [
+          "Audit"
+        ],
+        "summary": "按对象 id 查询审计轨迹",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Subject"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "该对象的审计事件",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AuditEvent"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/demo/reset": {
+      "post": {
+        "tags": [
+          "Demo"
+        ],
+        "summary": "清空演示数据（管理角色，DEMO_MODE=false 时禁用）",
+        "responses": {
+          "200": {
+            "description": "已重置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/demo/summary": {
+      "get": {
+        "tags": [
+          "Demo"
+        ],
+        "summary": "一次性查看区域、游标、链路、副本、DR 与政策",
+        "responses": {
+          "200": {
+            "description": "汇总视图",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
